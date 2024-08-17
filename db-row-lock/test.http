@@ -1,0 +1,16 @@
+### Step 1: Reserve ticket
+POST http://localhost:8080/reserve
+Content-Type: application/json
+
+{
+    "ticket_id": "a0eebc99-9c0b-4ef8-bb6d-6bb9bd380a12",
+    "user_id": "19f1ad49-b9be-41f6-92f9-a5a2f8e1840d"
+}
+
+### Step 2: Confirm ticket
+POST http://localhost:8080/confirm
+Content-Type: application/json
+
+{
+    "reservation_id": "f63f3b2d-9c2e-4fa6-9540-40aa1e0d0251"
+}
