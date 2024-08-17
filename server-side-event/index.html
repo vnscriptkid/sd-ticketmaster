@@ -1,0 +1,26 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Ticket Availability</title>
+</head>
+<body>
+    <h1>Live Ticket Availability</h1>
+    <div id="updates"></div>
+
+    <script>
+        const eventSource = new EventSource("http://localhost:8080/events");
+
+        eventSource.onmessage = function(event) {
+            document.getElementById("updates").innerHTML = "Update: " + event.data;
+        };
+
+        eventSource.addEventListener("ticket_update", function(event) {
+            document.getElementById("updates").innerHTML = "Update: " + event.data;
+        });
+
+        eventSource.onerror = function(event) {
+            console.error("EventSource failed:", event);
+        };
+    </script>
+</body>
+</html>
