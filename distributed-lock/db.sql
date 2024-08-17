@@ -1,4 +1,3 @@
-DROP TABLE IF EXISTS reservations;
 DROP TABLE IF EXISTS tickets;
 DROP TABLE IF EXISTS events;
 
@@ -15,16 +14,8 @@ CREATE TABLE tickets (
     id UUID PRIMARY KEY,
     event_id UUID REFERENCES events(id),
     seat_number TEXT NOT NULL,
-    status TEXT NOT NULL CHECK (status IN ('AVAILABLE', 'RESERVED', 'BOOKED'))
-);
-
-CREATE TABLE reservations (
-    id UUID PRIMARY KEY,
-    ticket_id UUID REFERENCES tickets(id),
-    user_id UUID NOT NULL,
-    created_at TIMESTAMP NOT NULL DEFAULT NOW(),
-    expires_at TIMESTAMP NOT NULL,
-    status TEXT NOT NULL CHECK (status IN ('PENDING', 'CONFIRMED', 'CANCELLED'))
+    status TEXT NOT NULL CHECK (status IN ('AVAILABLE', 'RESERVED', 'BOOKED')),
+    user_id UUID
 );
 
 -- Seed 1 event and 10 tickets
