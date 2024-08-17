@@ -9,6 +9,18 @@ services:
     ports:
       - 5432:5432
 
+  es:
+    image: docker.elastic.co/elasticsearch/elasticsearch:7.17.8
+    container_name: es
+    ports:
+      # The port 9200 is used for external communication with the Elasticsearch cluster: indexing and querying data
+      - 9200:9200
+      # port 9300 is used for internal communication between nodes in the cluster
+      - 9300:9300
+    environment:
+      - xpack.security.enabled=false
+      - "discovery.type=single-node"
+
   redis:
     image: redis:6.2.0
     ports:
