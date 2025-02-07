@@ -12,9 +12,8 @@
 | - | <img width="200" alt="Screenshot 2024-11-09 at 9 16 50 PM" src="https://github.com/user-attachments/assets/d4dd05b3-f167-4d07-8c0d-26fb3180345f"> | - |
 | - | <img width="400" alt="Screenshot 2024-11-09 at 9 17 40 PM" src="https://github.com/user-attachments/assets/363966ce-c871-423d-90d1-cb12c8d6bfc2"> | <p>POST /bookings/confirm</p> <br/> <p>Init checkout, get back paymentIntentID</p> |
 | - | <img width="400" alt="Screenshot 2024-11-09 at 9 18 22 PM" src="https://github.com/user-attachments/assets/b6e2edfb-3b0f-4e99-8a94-03b202534373"> | - |
-
-
-
+| Virtual waiting queue | <img width="400" alt="Screenshot 2024-11-09 at 9 18 22 PM" src="https://github.com/user-attachments/assets/06c67701-b76a-40b6-8e4e-b1f4387b4fda"> | - |
+| - | <img width="400" alt="Screenshot 2024-11-09 at 9 18 22 PM" src="https://github.com/user-attachments/assets/160eff0d-1596-4af2-afc6-9dd612601285"> | - |
 
 
 
