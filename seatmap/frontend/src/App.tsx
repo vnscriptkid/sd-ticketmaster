@@ -6,7 +6,7 @@ function App() {
   return (
     <div className="App">
       <h1>Ticketmaster-like Seat Map Demo</h1>
-      <SeatMap eventID={1} />
+      <SeatMap eventId={1} />
     </div>
   );
 }

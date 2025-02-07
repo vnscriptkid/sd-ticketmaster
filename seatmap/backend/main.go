@@ -48,29 +48,24 @@ type Reservation struct {
 	UserID    int64     `json:"user_id"`
 	ExpiresAt time.Time `json:"expires_at"`
 	CreatedAt time.Time `json:"created_at"`
-	Status    string    `json:"status"` // e.g. "active", "completed", "cancelled", "expired"
+	Status    string    `json:"status"` // "active", "completed", "cancelled", "expired", etc.
 }
 
 // ----------------------------------------------------------------------
-// 2. GLOBAL MOCK STORAGE
+// 2. GLOBAL MOCK STORAGE & ERRORS
 // ----------------------------------------------------------------------
 
 var (
-	mu sync.Mutex
-
-	mockEvents       = make(map[int64]*Event)
-	mockSeats        = make(map[int64]*Seat)
-	mockReservations = make(map[int64]*Reservation)
-
-	eventIDCounter       int64 = 1
-	seatIDCounter        int64 = 1
-	reservationIDCounter int64 = 1
+	mu                 sync.Mutex
+	mockEvents               = make(map[int64]*Event)
+	mockSeats                = make(map[int64]*Seat)
+	mockReservations         = make(map[int64]*Reservation)
+	eventIDCounter     int64 = 1
+	seatIDCounter      int64 = 1
+	reservationCounter int64 = 1
 )
 
-// ----------------------------------------------------------------------
-// 3. ERROR TYPES
-// ----------------------------------------------------------------------
-
+// Errors
 var (
 	ErrSeatNotFound        = &SeatMapError{"seat not found"}
 	ErrSeatNotAvailable    = &SeatMapError{"seat not available"}
@@ -79,6 +74,7 @@ var (
 	ErrReservationExpired  = &SeatMapError{"reservation expired"}
 )
 
+// SeatMapError is a simple custom error type.
 type SeatMapError struct {
 	Message string
 }
@@ -88,11 +84,11 @@ func (e *SeatMapError) Error() string {
 }
 
 // ----------------------------------------------------------------------
-// 4. INIT() -> SEED DUMMY DATA
+// 3. INIT() -> SEED DUMMY DATA
 // ----------------------------------------------------------------------
 
 func init() {
-	// Create a sample event.
+	// Create a sample event
 	e := &Event{
 		ID:        eventIDCounter,
 		Name:      "Rock Concert 2025",
@@ -102,7 +98,7 @@ func init() {
 	mockEvents[e.ID] = e
 	eventIDCounter++
 
-	// Create 5 seats for this event.
+	// Create 5 seats for the above event
 	for i := 1; i <= 5; i++ {
 		s := &Seat{
 			ID:      seatIDCounter,
@@ -117,24 +113,83 @@ func init() {
 }
 
 // ----------------------------------------------------------------------
-// 5. IN-MEMORY DB FUNCTIONS
+// 4. SSE MANAGER
 // ----------------------------------------------------------------------
 
+// SSEManager manages SSE subscribers for each event.
+type SSEManager struct {
+	mu          sync.Mutex
+	subscribers map[int64][]chan string // eventID -> list of subscriber channels
+}
+
+func NewSSEManager() *SSEManager {
+	return &SSEManager{
+		subscribers: make(map[int64][]chan string),
+	}
+}
+
+// Subscribe returns a channel on which the client will receive seatmap updates for a specific event.
+func (m *SSEManager) Subscribe(eventID int64) <-chan string {
+	ch := make(chan string, 1) // buffered channel to avoid blocking
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	m.subscribers[eventID] = append(m.subscribers[eventID], ch)
+	return ch
+}
+
+// Unsubscribe removes a channel from the SSEManager's subscriber list for the given event.
+func (m *SSEManager) Unsubscribe(eventID int64, ch <-chan string) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	subs := m.subscribers[eventID]
+	for i, subscriber := range subs {
+		if subscriber == ch {
+			// Remove it from the slice
+			subs = append(subs[:i], subs[i+1:]...)
+			break
+		}
+	}
+	m.subscribers[eventID] = subs
+}
+
+// Broadcast sends a message to all subscribers of the given event.
+func (m *SSEManager) Broadcast(eventID int64, message string) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	if subs, ok := m.subscribers[eventID]; ok {
+		for _, ch := range subs {
+			select {
+			case ch <- message:
+			default:
+				// If a subscriber's channel is blocked, skip it
+			}
+		}
+	}
+}
+
+// ----------------------------------------------------------------------
+// 5. IN-MEMORY SEAT OPERATIONS
+// ----------------------------------------------------------------------
+
+// GetAllSeatsForEvent returns all seats for a given event
 func GetAllSeatsForEvent(eventID int64) []*Seat {
 	mu.Lock()
 	defer mu.Unlock()
 
-	var result []*Seat
+	var seats []*Seat
 	for _, seat := range mockSeats {
 		if seat.EventID == eventID {
 			copySeat := *seat
-			result = append(result, &copySeat)
+			seats = append(seats, &copySeat)
 		}
 	}
-	return result
+	return seats
 }
 
-// ReserveSeat attempts to reserve a seat if it is available.
+// ReserveSeat attempts to reserve a seat if it is available
 func ReserveSeat(seatID, userID int64, duration time.Duration) error {
 	mu.Lock()
 	defer mu.Unlock()
@@ -149,7 +204,7 @@ func ReserveSeat(seatID, userID int64, duration time.Duration) error {
 
 	// Create a new reservation
 	r := &Reservation{
-		ID:        reservationIDCounter,
+		ID:        reservationCounter,
 		SeatID:    seatID,
 		UserID:    userID,
 		ExpiresAt: time.Now().Add(duration),
@@ -157,16 +212,15 @@ func ReserveSeat(seatID, userID int64, duration time.Duration) error {
 		Status:    "active",
 	}
 	mockReservations[r.ID] = r
-	reservationIDCounter++
+	reservationCounter++
 
-	// Update the seat status to reserved
+	// Update seat status to reserved
 	seat.Status = StatusReserved
 	seat.UpdatedAt = time.Now()
-
 	return nil
 }
 
-// BookSeat finalizes the purchase if the seat is still reserved by that user.
+// BookSeat finalizes the purchase if the seat is still reserved by that user
 func BookSeat(seatID, userID int64) error {
 	mu.Lock()
 	defer mu.Unlock()
@@ -190,9 +244,7 @@ func BookSeat(seatID, userID int64) error {
 	if res == nil {
 		return ErrReservationNotFound
 	}
-
 	if time.Now().After(res.ExpiresAt) {
-		// Mark seat back to available if expired
 		seat.Status = StatusAvailable
 		seat.UpdatedAt = time.Now()
 		res.Status = "expired"
@@ -209,10 +261,13 @@ func BookSeat(seatID, userID int64) error {
 }
 
 // ----------------------------------------------------------------------
-// 6. HANDLERS
+// 6. HTTP HANDLERS
 // ----------------------------------------------------------------------
 
-// getSeatsByEventHandler: GET /events/{eventID}/seats
+// We'll use a global SSE manager
+var sseManager = NewSSEManager()
+
+// getSeatsByEventHandler -> GET /events/{eventID}/seats
 func getSeatsByEventHandler(w http.ResponseWriter, r *http.Request) {
 	parts := splitPath(r.URL.Path)
 	// Expect: ["events", "{eventID}", "seats"]
@@ -220,7 +275,6 @@ func getSeatsByEventHandler(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "invalid path; expected /events/{id}/seats", http.StatusBadRequest)
 		return
 	}
-
 	eventIDStr := parts[1]
 	eventID, err := strconv.ParseInt(eventIDStr, 10, 64)
 	if err != nil {
@@ -229,12 +283,11 @@ func getSeatsByEventHandler(w http.ResponseWriter, r *http.Request) {
 	}
 
 	seats := GetAllSeatsForEvent(eventID)
-
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(seats)
 }
 
-// reserveSeatHandler: POST /seats/{seatID}/reserve
+// reserveSeatHandler -> POST /seats/{seatID}/reserve
 func reserveSeatHandler(w http.ResponseWriter, r *http.Request) {
 	parts := splitPath(r.URL.Path)
 	// Expect: ["seats", "{seatID}", "reserve"]
@@ -250,13 +303,13 @@ func reserveSeatHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// In a real app, you'd parse JWT/cookie for user info. We'll mock userID=1
+	// For demo, userID=1
 	userID := int64(1)
 
-	// Optional: read 'duration' from query params
+	// Duration from query param or 300s default
 	durationStr := r.URL.Query().Get("duration")
 	if durationStr == "" {
-		durationStr = "300" // default 300 seconds (5 mins)
+		durationStr = "300"
 	}
 	durationSec, _ := strconv.Atoi(durationStr)
 	duration := time.Duration(durationSec) * time.Second
@@ -266,11 +319,17 @@ func reserveSeatHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// After reserving seat, broadcast updated seatmap for that event
+	seat := getSeatByID(seatID)
+	if seat != nil {
+		broadcastSeatMap(seat.EventID)
+	}
+
 	w.WriteHeader(http.StatusOK)
 	w.Write([]byte("Seat reserved successfully."))
 }
 
-// bookSeatHandler: POST /seats/{seatID}/book
+// bookSeatHandler -> POST /seats/{seatID}/book
 func bookSeatHandler(w http.ResponseWriter, r *http.Request) {
 	parts := splitPath(r.URL.Path)
 	// Expect: ["seats", "{seatID}", "book"]
@@ -286,7 +345,7 @@ func bookSeatHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Mock user ID = 1
+	// For demo, userID=1
 	userID := int64(1)
 
 	if err := BookSeat(seatID, userID); err != nil {
@@ -294,16 +353,102 @@ func bookSeatHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// After booking, broadcast updated seatmap
+	seat := getSeatByID(seatID)
+	if seat != nil {
+		broadcastSeatMap(seat.EventID)
+	}
+
 	w.WriteHeader(http.StatusOK)
 	w.Write([]byte("Seat booked successfully."))
 }
 
-// splitPath is a helper that trims the leading slash and splits by "/".
-func splitPath(p string) []string {
-	if len(p) == 0 {
+// sseEventStreamHandler -> GET /events/{eventID}/seats/stream
+// This endpoint keeps the connection open and pushes event updates.
+func sseEventStreamHandler(w http.ResponseWriter, r *http.Request) {
+	parts := splitPath(r.URL.Path)
+	// Expect: ["events", "{eventID}", "seats", "stream"]
+	if len(parts) < 4 {
+		http.Error(w, "invalid path; expected /events/{id}/seats/stream", http.StatusBadRequest)
+		return
+	}
+	eventIDStr := parts[1]
+	eventID, err := strconv.ParseInt(eventIDStr, 10, 64)
+	if err != nil {
+		http.Error(w, "invalid event ID", http.StatusBadRequest)
+		return
+	}
+
+	// Set headers for SSE
+	w.Header().Set("Content-Type", "text/event-stream")
+	w.Header().Set("Cache-Control", "no-cache")
+	w.Header().Set("Connection", "keep-alive")
+	// Keep the connection open
+	flusher, ok := w.(http.Flusher)
+	if !ok {
+		http.Error(w, "streaming unsupported", http.StatusInternalServerError)
+		return
+	}
+
+	// Subscribe this client to SSE for the given event
+	ch := sseManager.Subscribe(eventID)
+	defer func() {
+		// On exit, unsubscribe
+		sseManager.Unsubscribe(eventID, ch)
+	}()
+
+	// Optionally, send an initial seatmap
+	initialMap := getSeatMapJSON(eventID)
+	if len(initialMap) > 0 {
+		fmt.Fprintf(w, "data: %s\n\n", initialMap)
+		flusher.Flush()
+	}
+
+	// Listen for seatmap updates in a loop
+	ctx := r.Context()
+	for {
+		select {
+		case <-ctx.Done():
+			// Client disconnected or request canceled
+			return
+		case msg := <-ch:
+			fmt.Fprintf(w, "data: %s\n\n", msg)
+			flusher.Flush()
+		}
+	}
+}
+
+// ----------------------------------------------------------------------
+// 7. UTILITIES
+// ----------------------------------------------------------------------
+
+func getSeatMapJSON(eventID int64) string {
+	seats := GetAllSeatsForEvent(eventID)
+	data, _ := json.Marshal(seats)
+	return string(data)
+}
+
+func broadcastSeatMap(eventID int64) {
+	// Build JSON of seats for that event
+	seatJSON := getSeatMapJSON(eventID)
+	// Broadcast via SSE
+	sseManager.Broadcast(eventID, seatJSON)
+}
+
+// getSeatByID is a simple helper to fetch a seat from the map by ID (locked).
+func getSeatByID(seatID int64) *Seat {
+	mu.Lock()
+	defer mu.Unlock()
+	seat, found := mockSeats[seatID]
+	if !found {
 		return nil
 	}
-	if p[0] == '/' {
+	return seat
+}
+
+// Helper: split path into segments, ignoring leading "/"
+func splitPath(p string) []string {
+	if len(p) > 0 && p[0] == '/' {
 		p = p[1:]
 	}
 	return splitOnSlash(p)
@@ -327,48 +472,54 @@ func splitOnSlash(s string) []string {
 }
 
 // ----------------------------------------------------------------------
-// 7. CORS MIDDLEWARE
+// 8. CORS MIDDLEWARE
 // ----------------------------------------------------------------------
 
 func corsMiddleware(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		// Allow any domain for demo; restrict in production
 		w.Header().Set("Access-Control-Allow-Origin", "*")
-		w.Header().Set("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS")
+		w.Header().Set("Access-Control-Allow-Methods", "GET, POST, OPTIONS")
 		w.Header().Set("Access-Control-Allow-Headers", "Content-Type, Authorization")
 
 		if r.Method == http.MethodOptions {
-			// Preflight request
 			w.WriteHeader(http.StatusOK)
 			return
 		}
-
 		next.ServeHTTP(w, r)
 	})
 }
 
 // ----------------------------------------------------------------------
-// 8. MAIN
+// 9. MAIN
 // ----------------------------------------------------------------------
 
 func main() {
 	mux := http.NewServeMux()
 
-	// GET /events/{id}/seats
+	// GET /events/{id}/seats -> List seats
 	mux.HandleFunc("/events/", func(w http.ResponseWriter, r *http.Request) {
-		// Only handle GET requests for seats listing
+		// handle seats or SSE stream
+		parts := splitPath(r.URL.Path)
 		if r.Method == http.MethodGet {
-			getSeatsByEventHandler(w, r)
-			return
+			if len(parts) == 3 && parts[2] == "seats" {
+				// GET /events/{id}/seats
+				getSeatsByEventHandler(w, r)
+				return
+			}
+			if len(parts) == 4 && parts[2] == "seats" && parts[3] == "stream" {
+				// GET /events/{id}/seats/stream
+				sseEventStreamHandler(w, r)
+				return
+			}
 		}
 		http.NotFound(w, r)
 	})
 
-	// POST /seats/{id}/reserve, POST /seats/{id}/book
+	// POST /seats/{id}/reserve or /seats/{id}/book
 	mux.HandleFunc("/seats/", func(w http.ResponseWriter, r *http.Request) {
 		if r.Method == http.MethodPost {
 			parts := splitPath(r.URL.Path)
-			if len(parts) == 3 {
+			if len(parts) >= 3 {
 				action := parts[2]
 				switch action {
 				case "reserve":
@@ -383,10 +534,9 @@ func main() {
 		http.NotFound(w, r)
 	})
 
-	// Wrap with CORS
-	corsWrappedMux := corsMiddleware(mux)
+	wrappedMux := corsMiddleware(mux)
 
 	addr := ":8080"
-	fmt.Println("Server running at http://localhost:8080")
-	log.Fatal(http.ListenAndServe(addr, corsWrappedMux))
+	log.Printf("Server listening at http://localhost:8080")
+	log.Fatal(http.ListenAndServe(addr, wrappedMux))
 }

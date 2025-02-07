@@ -28,14 +28,14 @@ function Seat({ seat, onReserve, onBook }) {
       {seat.status === "available" && (
         <button 
           style={{position: "absolute", opacity: 0}} 
-          onClick={onReserve}
+          onClick={() => console.log("Reserve seat", seat.id) as any || onReserve(seat.id)}
           aria-label="Reserve seat"
         />
       )}
       {seat.status === "reserved" && (
         <button 
           style={{position: "absolute", opacity: 0}}
-          onClick={onBook}
+          onClick={() => console.log("Book seat", seat.id) as any || onBook(seat.id)}
           aria-label="Book seat"
         />
       )}
